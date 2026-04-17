@@ -24,11 +24,13 @@ import numpy as np
 import matplotlib
 try:
     matplotlib.use("Qt5Agg")
-except:
+except Exception:
     matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.gridspec import GridSpec
+from matplotlib.patches import Arc, Wedge, FancyBboxPatch
+from matplotlib.collections import LineCollection
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS & PALETTE  (game2 dark style)
@@ -70,20 +72,34 @@ DIFFICULTY_LEVELS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SHARED DATA STORE
+# SHARED DATA STORE  (expanded for rich dashboard)
 # ─────────────────────────────────────────────────────────────────────────────
 class SharedData:
     def __init__(self):
-        self.lock            = threading.Lock()
-        self.trial_numbers   = deque(maxlen=200)
-        self.reaction_times  = deque(maxlen=200)
-        self.stabilities     = deque(maxlen=200)
-        self.difficulties    = deque(maxlen=200)
-        self.scores          = deque(maxlen=200)
-        self.total_trials    = 0
-        self.total_hits      = 0
-        self.current_diff    = 1
-        self.session_start   = time.time()
+        self.lock              = threading.Lock()
+        self.trial_numbers     = deque(maxlen=500)
+        self.reaction_times    = deque(maxlen=500)
+        self.stabilities       = deque(maxlen=500)
+        self.difficulties      = deque(maxlen=500)
+        self.scores_binary     = deque(maxlen=500)
+        self.score_labels      = deque(maxlen=500)
+        self.velocities        = deque(maxlen=500)
+        self.error_distances   = deque(maxlen=500)
+        self.combo_at_trial    = deque(maxlen=500)
+        self.health_at_trial   = deque(maxlen=500)
+        self.cumulative_scores = deque(maxlen=500)
+        self.total_trials      = 0
+        self.total_hits        = 0
+        self.current_diff      = 1
+        self.session_start     = time.time()
+        self.current_combo     = 0
+        self.max_combo         = 0
+        self.current_health    = 100.0
+        self.current_score     = 0
+        self.perfect_count     = 0
+        self.great_count       = 0
+        self.good_count        = 0
+        self.miss_count        = 0
 
 shared = SharedData()
 
@@ -96,7 +112,8 @@ def init_csv():
             csv.writer(f).writerow(CSV_COLUMNS)
 
 def log_trial(target_id, reaction_time, error_dist, velocity,
-              difficulty, hit_score, motion_var, target_type):
+              difficulty, hit_score, motion_var, target_type,
+              current_combo=0, current_health=100.0, current_score=0):
     row = [
         datetime.now().isoformat(timespec="milliseconds"),
         target_id, f"{reaction_time:.4f}", f"{error_dist:.2f}",
@@ -105,6 +122,7 @@ def log_trial(target_id, reaction_time, error_dist, velocity,
     ]
     with open(CSV_PATH, "a", newline="") as f:
         csv.writer(f).writerow(row)
+
     with shared.lock:
         shared.total_trials += 1
         shared.trial_numbers.append(shared.total_trials)
@@ -112,10 +130,28 @@ def log_trial(target_id, reaction_time, error_dist, velocity,
         stability = max(0.0, 1.0 - min(motion_var / 500.0, 1.0))
         shared.stabilities.append(stability)
         shared.difficulties.append(difficulty)
-        shared.scores.append(1 if hit_score != "Miss" else 0)
+        shared.velocities.append(velocity)
+        shared.error_distances.append(error_dist)
+        shared.combo_at_trial.append(current_combo)
+        shared.health_at_trial.append(current_health)
+        shared.current_score  = current_score
+        shared.cumulative_scores.append(current_score)
+        shared.current_diff   = difficulty
+        shared.current_combo  = current_combo
+        shared.current_health = current_health
+        shared.score_labels.append(hit_score)
+
         if hit_score != "Miss":
             shared.total_hits += 1
-        shared.current_diff = difficulty
+            shared.scores_binary.append(1)
+            shared.max_combo = max(shared.max_combo, current_combo)
+        else:
+            shared.scores_binary.append(0)
+
+        if   hit_score == "Perfect": shared.perfect_count += 1
+        elif hit_score == "Great":   shared.great_count   += 1
+        elif hit_score == "Good":    shared.good_count    += 1
+        elif hit_score == "Miss":    shared.miss_count    += 1
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ADAPTIVE DIFFICULTY ENGINE
@@ -302,20 +338,17 @@ class HitCircle:
         fl  = self.frac_left
         urg = 1.0 - fl
 
-        # Base color shifts to red as time runs out
         base_c = CYAN
         c_r = min(255, int(base_c[0] + (RED[0]-base_c[0])*urg*0.6))
         c_g = max(0,   int(base_c[1] + (RED[1]-base_c[1])*urg*0.6))
         c_b = max(0,   int(base_c[2] + (RED[2]-base_c[2])*urg*0.6))
         draw_col = (c_r, c_g, c_b)
 
-        # Outer glow rings
         for offset, alpha_base in [(14,60),(9,90),(5,130)]:
             ar = int(pr + offset)
             col = tuple(int(c*(alpha_base/255)) for c in base_c)
             pygame.draw.circle(surf, col, (self.x, self.y), ar, 2)
 
-        # Approach shrinking ring
         approach_r = int(pr + 55*fl)
         ring_col = (
             int(255*urg + base_c[0]*(1-urg)),
@@ -324,12 +357,9 @@ class HitCircle:
         )
         pygame.draw.circle(surf, ring_col, (self.x, self.y), approach_r, 2)
 
-        # Main fill circle
         pygame.draw.circle(surf, draw_col, (self.x, self.y), int(pr))
-        # White center dot
         pygame.draw.circle(surf, WHITE, (self.x, self.y), max(5, int(pr*0.28)))
 
-        # Countdown arc (sweeping)
         if fl > 0 and approach_r > 0:
             try:
                 ar_rect = pygame.Rect(
@@ -341,7 +371,6 @@ class HitCircle:
             except:
                 pass
 
-        # Urgency pulse when <30% time left
         if fl < 0.3:
             p2 = (self.pulse*3) % (2*math.pi)
             pulse_extra = int(4*math.sin(p2)*fl/0.3)
@@ -394,39 +423,32 @@ def draw_hud(surf, fonts, diff_mgr, score, combo, accuracy, elapsed, health, rec
     diff_cols = [GREEN, CYAN, YELLOW, PINK, RED]
     col = diff_cols[level - 1]
 
-    # Top bar background
     _panel(surf, pygame.Rect(0, 0, SCREEN_W, 90), fill=(12,15,25), border=BORDER, r=0)
 
-    # ① Score
     _txt(surf, f"{score:,}", fonts["hud"], CYAN, x=18, y=8)
     _txt(surf, "SCORE", fonts["tiny"], GREY, x=18, y=50)
 
-    # ② Level pill
     lx = 215
     pygame.draw.rect(surf, col, pygame.Rect(lx, 10, 115, 34), border_radius=8)
     _txt(surf, f"LVL {level}", fonts["fb"], BG_DARK, cx=lx+57, y=16)
     short_label = params["label"].split("-")[1].strip() if "-" in params["label"] else params["label"]
     _txt(surf, short_label, fonts["tiny"], GREY, cx=lx+57, y=50)
 
-    # ③ Combo
     cx_c = lx + 145
     sc   = ORANGE if combo >= 5 else (WHITE if combo > 0 else GREY)
     _txt(surf, f"x{combo}", fonts["hud"], sc, x=cx_c, y=8)
     _txt(surf, "COMBO", fonts["tiny"], GREY, x=cx_c, y=50)
 
-    # ④ Accuracy
     ax  = cx_c + 115
     ac  = GREEN if accuracy > 80 else (YELLOW if accuracy > 55 else ORANGE)
     _txt(surf, f"{accuracy:.0f}%", fonts["hud"], ac, x=ax, y=8)
     _txt(surf, "ACCURACY", fonts["tiny"], GREY, x=ax, y=50)
 
-    # ⑤ Timer
     mins = int(elapsed)//60; secs = int(elapsed)%60
     tx   = ax + 140
     _txt(surf, f"{mins:02d}:{secs:02d}", fonts["hud"], LGREY, x=tx, y=8)
     _txt(surf, "TIME", fonts["tiny"], GREY, x=tx, y=50)
 
-    # ⑥ Health bar – right side
     hbar_x = SCREEN_W - 325
     hbar_w = 300
     health_pct = max(0, min(100, health)) / 100.0
@@ -435,95 +457,479 @@ def draw_hud(surf, fonts, diff_mgr, score, combo, accuracy, elapsed, health, rec
     _pbar(surf, hbar_x, 22, hbar_w, 20, health_pct, hp_col, bg=(28,36,60), r=6)
     _txt(surf, f"{int(health)}%", fonts["tiny"], hp_col, x=hbar_x + hbar_w + 5, y=25)
 
-    # ⑦ Mini sparkline for recent reaction times
     rts_list = list(recent_rts)
     if len(rts_list) >= 3:
         _mini_spark(surf, hbar_x, 50, hbar_w, 32, rts_list[-12:], CYAN)
         _txt(surf, "Reaction times (recent)", fonts["tiny"], (60,75,110), x=hbar_x, y=83)
 
-    # ⑧ Bottom hint
     hint = fonts["tiny"].render("Click the circles  |  ESC to quit", True, (45,58,85))
     surf.blit(hint, (SCREEN_W//2 - hint.get_width()//2, SCREEN_H - 18))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CLINICAL DASHBOARD
+# ███  PREMIUM CLINICAL DASHBOARD  (9 panels, neon style)  ███
 # ─────────────────────────────────────────────────────────────────────────────
 _dashboard_stop = threading.Event()
 
+# Hex colors for matplotlib
+_NEON     = "#00d2ff"
+_PINK_H   = "#ff3282"
+_GREEN_H  = "#32e678"
+_YELLOW_H = "#ffd21e"
+_ORANGE_H = "#ff8c1e"
+_RED_H    = "#ff4646"
+_BG       = "#0e101a"
+_PANEL_BG = "#0d1117"
+_GRID_C   = "#1a2033"
+_TEXT_DIM = "#505a6e"
+_TEXT_MID = "#8892a6"
+_WHITE_H  = "#e8eaf0"
+
+def _rolling_average(vals, window=5):
+    """Compute a rolling average over a list."""
+    if len(vals) < window:
+        window = max(1, len(vals))
+    arr = np.array(vals, dtype=float)
+    kernel = np.ones(window) / window
+    return np.convolve(arr, kernel, mode='valid')
+
+def _compute_radar_values(shared_snap):
+    """
+    Returns 5 metrics normalised to 0-1 for a radar/spider chart:
+      - Accuracy, Reaction Speed, Stability, Consistency, Endurance
+    """
+    t_total = shared_snap["total_trials"]
+    t_hits  = shared_snap["total_hits"]
+    rts     = shared_snap["reaction_times"]
+    stabs   = shared_snap["stabilities"]
+    health  = shared_snap["current_health"]
+
+    accuracy = (t_hits / t_total) if t_total else 0.0
+
+    if rts:
+        avg_rt = np.mean(rts)
+        speed = max(0.0, min(1.0, 1.0 - (avg_rt / 3.0)))
+    else:
+        speed = 0.5
+
+    stability = np.mean(stabs) if stabs else 0.5
+
+    if len(rts) >= 3:
+        std_rt = np.std(rts)
+        consistency = max(0.0, min(1.0, 1.0 - std_rt / 1.5))
+    else:
+        consistency = 0.5
+
+    endurance = health / 100.0
+
+    return [accuracy, speed, stability, consistency, endurance]
+
+def _style_ax(ax, title="", xlabel="", ylabel=""):
+    """Apply consistent dark neon style to an axis."""
+    ax.set_facecolor(_PANEL_BG)
+    for spine in ax.spines.values():
+        spine.set_color(_GRID_C)
+        spine.set_linewidth(0.6)
+    ax.tick_params(colors=_TEXT_DIM, labelsize=7, length=3, width=0.5)
+    ax.xaxis.label.set_color(_TEXT_DIM)
+    ax.yaxis.label.set_color(_TEXT_DIM)
+    ax.grid(True, color=_GRID_C, linewidth=0.3, alpha=0.5)
+    if title:
+        ax.set_title(title, color=_NEON, fontsize=9, fontweight="bold",
+                      pad=8, loc="left")
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=7, labelpad=4)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=7, labelpad=4)
+
 def clinical_dashboard():
+    """Premium 9-panel real-time clinical dashboard."""
     try:
         plt.style.use("dark_background")
-        fig = plt.figure(figsize=(12, 7), facecolor="#0d1117")
-        fig.canvas.manager.set_window_title("Neuro-Osu  Clinical Dashboard")
-        gs  = GridSpec(2, 3, figure=fig, hspace=0.45, wspace=0.4)
-        ax_rt   = fig.add_subplot(gs[0, :2])
-        ax_stab = fig.add_subplot(gs[1, :2])
-        ax_diff = fig.add_subplot(gs[0, 2])
-        ax_info = fig.add_subplot(gs[1, 2])
-        NEON="##00fff0"; PINK_H="#ff007f"
+        fig = plt.figure(figsize=(16, 9.5), facecolor=_BG)
+        fig.canvas.manager.set_window_title("Neuro-Osu │ Premium Clinical Dashboard")
 
-        def update(frame):
-            if _dashboard_stop.is_set(): return
+        gs = GridSpec(3, 4, figure=fig, hspace=0.52, wspace=0.42,
+                      left=0.05, right=0.97, top=0.92, bottom=0.06)
+
+        # Row 0
+        ax_rt       = fig.add_subplot(gs[0, 0:2])   # Reaction Time
+        ax_acc_roll = fig.add_subplot(gs[0, 2])      # Rolling Accuracy
+        ax_radar    = fig.add_subplot(gs[0, 3], polar=True)  # Radar
+
+        # Row 1
+        ax_stab     = fig.add_subplot(gs[1, 0:2])   # Stability bars
+        ax_combo    = fig.add_subplot(gs[1, 2])      # Combo / Health
+        ax_diff     = fig.add_subplot(gs[1, 3])      # Difficulty gauge
+
+        # Row 2
+        ax_vel      = fig.add_subplot(gs[2, 0])      # Velocity
+        ax_err      = fig.add_subplot(gs[2, 1])      # Error Distance
+        ax_pie      = fig.add_subplot(gs[2, 2])      # Hit Breakdown pie
+        ax_info     = fig.add_subplot(gs[2, 3])      # Session Metrics
+
+        def _snapshot():
+            """Thread-safe copy of shared data."""
             with shared.lock:
-                trials  = list(shared.trial_numbers)
-                rts     = list(shared.reaction_times)
-                stabs   = list(shared.stabilities)
-                t_total = shared.total_trials
-                t_hits  = shared.total_hits
-                diff_now= shared.current_diff
-                elapsed = time.time() - shared.session_start
-            for ax in [ax_rt, ax_stab, ax_diff, ax_info]:
-                ax.cla(); ax.set_facecolor("#0d1117")
-                for sp in ax.spines.values(): sp.set_color("#1e2533")
-            if trials:
-                ax_rt.plot(trials, rts, color=NEON, lw=1.5, alpha=0.8)
-                ax_rt.fill_between(trials, rts, alpha=0.15, color=NEON)
-            ax_rt.set_title("Reaction Time per Trial (s)", color=NEON, fontsize=9, pad=6)
-            ax_rt.set_xlabel("Trial #", color="#505a6e", fontsize=8)
-            ax_rt.set_ylabel("Seconds",  color="#505a6e", fontsize=8)
-            ax_rt.tick_params(colors="#505a6e", labelsize=7)
-            if trials:
-                cs = ["#00e678" if s>=0.7 else ("#ffdc32" if s>=0.4 else "#ff3232") for s in stabs]
-                ax_stab.bar(trials, stabs, color=cs, alpha=0.7, width=0.8)
-                ax_stab.axhline(0.7, color=NEON, lw=1, linestyle=":", alpha=0.6)
-            ax_stab.set_ylim(0,1.05)
-            ax_stab.set_title("Stability Ratio per Trial", color=NEON, fontsize=9, pad=6)
-            ax_stab.set_xlabel("Trial #",      color="#505a6e", fontsize=8)
-            ax_stab.set_ylabel("Stability",    color="#505a6e", fontsize=8)
-            ax_stab.tick_params(colors="#505a6e", labelsize=7)
-            angle=( diff_now/5)*270-135; theta=math.radians(angle)
-            ax_diff.set_xlim(-1.3,1.3); ax_diff.set_ylim(-1.3,1.3)
-            ax_diff.set_aspect("equal"); ax_diff.axis("off")
-            from matplotlib.patches import Arc
-            arc_cols=["#00e678",NEON,"#ffdc32",PINK_H,"#ff3232"]
-            arc_c=arc_cols[diff_now-1]
-            ax_diff.add_patch(Arc((0,0),2,2,angle=0,theta1=-135,theta2=135,color=arc_c,lw=8,alpha=0.7))
-            nl=0.75
-            ax_diff.annotate("",xy=(nl*math.cos(theta),nl*math.sin(theta)),xytext=(0,0),
-                             arrowprops=dict(arrowstyle="-|>",color="#f0f0ff",lw=2))
-            ax_diff.text(0,-0.35,f"Level {diff_now}",ha="center",va="center",color=arc_c,fontsize=14,fontweight="bold")
-            ax_diff.text(0,-0.7,DIFFICULTY_LEVELS[diff_now]["label"].split("-")[1].strip(),
-                         ha="center",color="#505a6e",fontsize=8)
-            ax_diff.set_title("Difficulty",color=NEON,fontsize=9,pad=2)
-            ax_info.axis("off")
-            acc=(t_hits/t_total*100) if t_total else 0
-            mins2=int(elapsed)//60; secs2=int(elapsed)%60
-            lines=[("SESSION METRICS",NEON,11),(f"Duration  {mins2:02d}:{secs2:02d}","#505a6e",9),
-                   (f"Trials    {t_total}","#505a6e",9),(f"Hits      {t_hits}","#00e678",9),
-                   (f"Misses    {t_total-t_hits}","#ff3232",9),(f"Accuracy  {acc:.1f}%",NEON,10)]
-            for i2,(tx2,c2,fs2) in enumerate(lines):
-                ax_info.text(0.05,0.92-i2*0.16,tx2,transform=ax_info.transAxes,
-                             color=c2,fontsize=fs2,fontweight="bold" if i2==0 else "normal")
-            fig.suptitle("NEURO-OSU  Clinical Dashboard",color=NEON,fontsize=11,x=0.5,y=0.98)
+                return {
+                    "trials":       list(shared.trial_numbers),
+                    "rts":          list(shared.reaction_times),
+                    "stabs":        list(shared.stabilities),
+                    "diffs":        list(shared.difficulties),
+                    "scores_bin":   list(shared.scores_binary),
+                    "labels":       list(shared.score_labels),
+                    "velocities":   list(shared.velocities),
+                    "errors":       list(shared.error_distances),
+                    "combos":       list(shared.combo_at_trial),
+                    "healths":      list(shared.health_at_trial),
+                    "cum_scores":   list(shared.cumulative_scores),
+                    "total_trials": shared.total_trials,
+                    "total_hits":   shared.total_hits,
+                    "current_diff": shared.current_diff,
+                    "elapsed":      time.time() - shared.session_start,
+                    "current_combo":  shared.current_combo,
+                    "max_combo":      shared.max_combo,
+                    "current_health": shared.current_health,
+                    "current_score":  shared.current_score,
+                    "perfect":  shared.perfect_count,
+                    "great":    shared.great_count,
+                    "good":     shared.good_count,
+                    "miss":     shared.miss_count,
+                    "reaction_times": list(shared.reaction_times),
+                    "stabilities":    list(shared.stabilities),
+                    "current_health": shared.current_health,
+                }
 
-        ani = animation.FuncAnimation(fig, update, interval=800, cache_frame_data=False)
+        def update(_frame):
+            if _dashboard_stop.is_set():
+                return
+
+            snap = _snapshot()
+            trials  = snap["trials"]
+            rts     = snap["rts"]
+            stabs   = snap["stabs"]
+            diffs   = snap["diffs"]
+            labels  = snap["labels"]
+            vels    = snap["velocities"]
+            errs    = snap["errors"]
+            combos  = snap["combos"]
+            healths = snap["healths"]
+            cum_sc  = snap["cum_scores"]
+            t_total = snap["total_trials"]
+            t_hits  = snap["total_hits"]
+            diff_now= snap["current_diff"]
+            elapsed = snap["elapsed"]
+
+            # ─── Clear all axes ──────────────────────────────
+            all_axes = [ax_rt, ax_acc_roll, ax_stab, ax_combo,
+                        ax_diff, ax_vel, ax_err, ax_pie, ax_info]
+            for ax in all_axes:
+                ax.cla()
+                ax.set_facecolor(_PANEL_BG)
+                for sp in ax.spines.values():
+                    sp.set_color(_GRID_C)
+            ax_radar.cla()
+            ax_radar.set_facecolor(_PANEL_BG)
+
+            # ═══════════════════════════════════════════════════
+            # 1 ▸ REACTION TIME  (gradient fill + rolling avg)
+            # ═══════════════════════════════════════════════════
+            _style_ax(ax_rt, "⏱  Reaction Time", "Trial #", "Seconds")
+            if trials:
+                ax_rt.fill_between(trials, rts, alpha=0.12, color=_NEON)
+                ax_rt.plot(trials, rts, color=_NEON, lw=1.2, alpha=0.6,
+                           marker="o", markersize=2.5)
+                if len(rts) >= 5:
+                    ra = _rolling_average(rts, 5)
+                    ra_x = trials[4:]
+                    ax_rt.plot(ra_x, ra, color=_PINK_H, lw=2, alpha=0.9,
+                               label="5-trial avg")
+                    ax_rt.legend(fontsize=7, loc="upper right",
+                                  facecolor=_PANEL_BG, edgecolor=_GRID_C,
+                                  labelcolor=_TEXT_MID)
+                avg_val = np.mean(rts)
+                ax_rt.axhline(avg_val, color=_YELLOW_H, lw=0.8,
+                               ls="--", alpha=0.5)
+                ax_rt.text(trials[-1], avg_val,
+                            f" μ={avg_val:.2f}s", color=_YELLOW_H,
+                            fontsize=7, va="bottom")
+
+            # ═══════════════════════════════════════════════════
+            # 2 ▸ ROLLING ACCURACY  (area chart)
+            # ═══════════════════════════════════════════════════
+            _style_ax(ax_acc_roll, "🎯  Rolling Accuracy", "Trial #", "%")
+            if len(snap["scores_bin"]) >= 3:
+                sb = np.array(snap["scores_bin"], dtype=float)
+                window = min(8, len(sb))
+                kernel = np.ones(window)/window
+                rolling_acc = np.convolve(sb, kernel, mode="valid") * 100
+                rx = list(range(window, window + len(rolling_acc)))
+                ax_acc_roll.fill_between(rx, rolling_acc, alpha=0.18,
+                                          color=_GREEN_H)
+                ax_acc_roll.plot(rx, rolling_acc, color=_GREEN_H, lw=2)
+                ax_acc_roll.axhline(70, color=_YELLOW_H, lw=0.7,
+                                     ls=":", alpha=0.5)
+                ax_acc_roll.text(rx[-1]+0.3, rolling_acc[-1],
+                                  f"{rolling_acc[-1]:.0f}%",
+                                  color=_GREEN_H, fontsize=8,
+                                  fontweight="bold", va="center")
+            ax_acc_roll.set_ylim(0, 105)
+
+            # ═══════════════════════════════════════════════════
+            # 3 ▸ PERFORMANCE RADAR
+            # ═══════════════════════════════════════════════════
+            radar_labels = ["Accuracy", "Speed", "Stability",
+                            "Consistency", "Endurance"]
+            rv = _compute_radar_values(snap)
+            N = len(radar_labels)
+            angles = np.linspace(0, 2*np.pi, N, endpoint=False).tolist()
+            rv_plot = rv + [rv[0]]
+            angles += [angles[0]]
+
+            ax_radar.set_facecolor(_PANEL_BG)
+            ax_radar.plot(angles, rv_plot, color=_NEON, lw=2, alpha=0.9)
+            ax_radar.fill(angles, rv_plot, color=_NEON, alpha=0.15)
+            ax_radar.scatter(angles[:-1], rv[0:N], color=_NEON, s=30,
+                              zorder=5, edgecolors=_WHITE_H, linewidths=0.5)
+            ax_radar.set_xticks(angles[:-1])
+            ax_radar.set_xticklabels(radar_labels, fontsize=7,
+                                      color=_TEXT_MID)
+            ax_radar.set_ylim(0, 1.0)
+            ax_radar.set_yticks([0.25, 0.5, 0.75, 1.0])
+            ax_radar.set_yticklabels(["25%","50%","75%","100%"],
+                                      fontsize=6, color=_TEXT_DIM)
+            ax_radar.yaxis.grid(True, color=_GRID_C, lw=0.4)
+            ax_radar.xaxis.grid(True, color=_GRID_C, lw=0.4)
+            ax_radar.set_title("🕸  Performance Radar", color=_NEON,
+                                fontsize=9, fontweight="bold", pad=14)
+            for spine in ax_radar.spines.values():
+                spine.set_color(_GRID_C)
+
+            # ═══════════════════════════════════════════════════
+            # 4 ▸ STABILITY BARS  (colour-coded)
+            # ═══════════════════════════════════════════════════
+            _style_ax(ax_stab, "📊  Hand Stability", "Trial #", "Stability")
+            if trials:
+                bar_colors = []
+                for s_val in stabs:
+                    if   s_val >= 0.7: bar_colors.append(_GREEN_H)
+                    elif s_val >= 0.4: bar_colors.append(_YELLOW_H)
+                    else:              bar_colors.append(_RED_H)
+                ax_stab.bar(trials, stabs, color=bar_colors, alpha=0.75,
+                             width=0.8, edgecolor="none")
+                ax_stab.axhline(0.7, color=_NEON, lw=1, ls=":",
+                                 alpha=0.6, label="Target (0.7)")
+                if len(stabs) >= 5:
+                    sa = _rolling_average(stabs, 5)
+                    sa_x = trials[4:]
+                    ax_stab.plot(sa_x, sa, color=_PINK_H, lw=2,
+                                  alpha=0.85, label="Trend")
+                ax_stab.legend(fontsize=6, loc="lower right",
+                                facecolor=_PANEL_BG, edgecolor=_GRID_C,
+                                labelcolor=_TEXT_MID)
+            ax_stab.set_ylim(0, 1.05)
+
+            # ═══════════════════════════════════════════════════
+            # 5 ▸ COMBO & HEALTH TIMELINE
+            # ═══════════════════════════════════════════════════
+            _style_ax(ax_combo, "❤️  Health & Combo", "Trial #", "")
+            if trials:
+                ax_combo.plot(trials, healths, color=_RED_H, lw=2,
+                               alpha=0.85, label="Health %")
+                ax_combo.fill_between(trials, healths, alpha=0.1,
+                                       color=_RED_H)
+                ax2 = ax_combo.twinx()
+                ax2.set_facecolor("none")
+                ax2.plot(trials, combos, color=_ORANGE_H, lw=1.5,
+                          alpha=0.8, ls="--", label="Combo")
+                ax2.tick_params(colors=_TEXT_DIM, labelsize=7)
+                ax2.set_ylabel("Combo", fontsize=7, color=_TEXT_DIM)
+                for sp in ax2.spines.values():
+                    sp.set_color(_GRID_C)
+                lines1, labels1 = ax_combo.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax_combo.legend(lines1+lines2, labels1+labels2,
+                                 fontsize=6, loc="upper left",
+                                 facecolor=_PANEL_BG, edgecolor=_GRID_C,
+                                 labelcolor=_TEXT_MID)
+            ax_combo.set_ylim(0, 110)
+
+            # ═══════════════════════════════════════════════════
+            # 6 ▸ DIFFICULTY GAUGE  (arc gauge)
+            # ═══════════════════════════════════════════════════
+            ax_diff.set_xlim(-1.5, 1.5)
+            ax_diff.set_ylim(-1.0, 1.5)
+            ax_diff.set_aspect("equal")
+            ax_diff.axis("off")
+            ax_diff.set_facecolor(_PANEL_BG)
+
+            arc_colors_hex = [_GREEN_H, _NEON, _YELLOW_H, _PINK_H, _RED_H]
+            segment_span = 270 / 5
+            for i in range(5):
+                theta1 = -135 + i * segment_span
+                theta2 = theta1 + segment_span - 2
+                c = arc_colors_hex[i]
+                alpha = 0.9 if (i+1) == diff_now else 0.25
+                ax_diff.add_patch(Arc((0, 0), 2.2, 2.2, angle=0,
+                                       theta1=theta1, theta2=theta2,
+                                       color=c, lw=10, alpha=alpha))
+
+            needle_angle_deg = -135 + (diff_now - 0.5) * segment_span
+            needle_rad = math.radians(needle_angle_deg)
+            nl = 0.8
+            nx = nl * math.cos(needle_rad)
+            ny = nl * math.sin(needle_rad)
+            ax_diff.annotate("", xy=(nx, ny), xytext=(0, 0),
+                              arrowprops=dict(arrowstyle="-|>",
+                                               color=_WHITE_H, lw=2.5))
+            ax_diff.plot(0, 0, "o", color=_TEXT_DIM, markersize=6)
+
+            ac = arc_colors_hex[diff_now - 1]
+            ax_diff.text(0, -0.30, f"Level {diff_now}", ha="center",
+                          va="center", color=ac, fontsize=16,
+                          fontweight="bold")
+            lbl = DIFFICULTY_LEVELS[diff_now]["label"].split("-")[1].strip()
+            ax_diff.text(0, -0.60, lbl, ha="center", color=_TEXT_DIM,
+                          fontsize=8)
+            ax_diff.set_title("⚙  Difficulty", color=_NEON, fontsize=9,
+                               fontweight="bold", pad=4)
+
+            # ═══════════════════════════════════════════════════
+            # 7 ▸ CURSOR VELOCITY OVER TRIALS
+            # ═══════════════════════════════════════════════════
+            _style_ax(ax_vel, "🚀  Cursor Velocity", "Trial #", "px/s")
+            if trials and vels:
+                ax_vel.fill_between(trials, vels, alpha=0.12,
+                                     color=_ORANGE_H)
+                ax_vel.plot(trials, vels, color=_ORANGE_H, lw=1.5,
+                             marker="o", markersize=2, alpha=0.8)
+                if len(vels) >= 5:
+                    va = _rolling_average(vels, 5)
+                    va_x = trials[4:]
+                    ax_vel.plot(va_x, va, color=_NEON, lw=2, alpha=0.9)
+
+            # ═══════════════════════════════════════════════════
+            # 8 ▸ ERROR DISTANCE HEATMAP STRIP
+            # ═══════════════════════════════════════════════════
+            _style_ax(ax_err, "📐  Click Precision", "Trial #",
+                       "Error (px)")
+            if trials and errs:
+                scatter_colors = []
+                for e in errs:
+                    if   e < 10: scatter_colors.append(_GREEN_H)
+                    elif e < 25: scatter_colors.append(_YELLOW_H)
+                    elif e < 50: scatter_colors.append(_ORANGE_H)
+                    else:        scatter_colors.append(_RED_H)
+                ax_err.scatter(trials, errs, c=scatter_colors, s=25,
+                                alpha=0.8, edgecolors="none", zorder=3)
+                if len(errs) >= 3:
+                    ea = _rolling_average(errs, 5 if len(errs)>=5 else len(errs))
+                    ea_x = trials[len(trials)-len(ea):]
+                    ax_err.plot(ea_x, ea, color=_PINK_H, lw=2,
+                                 alpha=0.85)
+                ax_err.axhline(25, color=_YELLOW_H, lw=0.7, ls=":",
+                                alpha=0.5)
+
+            # ═══════════════════════════════════════════════════
+            # 9a ▸ HIT BREAKDOWN PIE
+            # ═══════════════════════════════════════════════════
+            ax_pie.set_facecolor(_PANEL_BG)
+            ax_pie.axis("equal")
+            counts = [snap["perfect"], snap["great"],
+                      snap["good"], snap["miss"]]
+            pie_labels  = ["Perfect", "Great", "Good", "Miss"]
+            pie_colors  = [_NEON, _GREEN_H, _YELLOW_H, _RED_H]
+            if sum(counts) > 0:
+                wedges, texts, autotexts = ax_pie.pie(
+                    counts, labels=pie_labels, colors=pie_colors,
+                    autopct=lambda p: f"{p:.0f}%" if p > 0 else "",
+                    startangle=90, pctdistance=0.75,
+                    wedgeprops=dict(width=0.45, edgecolor=_PANEL_BG,
+                                    linewidth=2))
+                for t in texts:
+                    t.set_color(_TEXT_MID); t.set_fontsize(7)
+                for t in autotexts:
+                    t.set_color(_WHITE_H); t.set_fontsize(7)
+                    t.set_fontweight("bold")
+            else:
+                ax_pie.text(0, 0, "No data", ha="center", va="center",
+                             color=_TEXT_DIM, fontsize=10)
+            ax_pie.set_title("🏆  Hit Breakdown", color=_NEON, fontsize=9,
+                              fontweight="bold", pad=8)
+
+            # ═══════════════════════════════════════════════════
+            # 9b ▸ SESSION METRICS PANEL
+            # ═══════════════════════════════════════════════════
+            ax_info.axis("off")
+            ax_info.set_facecolor(_PANEL_BG)
+
+            acc = (t_hits / t_total * 100) if t_total else 0
+            mins = int(elapsed) // 60
+            secs = int(elapsed) % 60
+            avg_rt = f"{np.mean(rts):.3f}s" if rts else "—"
+            best_rt = f"{min(rts):.3f}s" if rts else "—"
+            avg_stab = f"{np.mean(stabs):.2f}" if stabs else "—"
+
+            metrics = [
+                ("SESSION METRICS", _NEON,     12, "bold"),
+                ("─"*28,            _GRID_C,    8, "normal"),
+                (f"Duration      {mins:02d}:{secs:02d}",
+                                    _TEXT_MID,  9, "normal"),
+                (f"Total Trials  {t_total}",
+                                    _TEXT_MID,  9, "normal"),
+                (f"Hits          {t_hits}",
+                                    _GREEN_H,   9, "bold"),
+                (f"Misses        {snap['miss']}",
+                                    _RED_H,     9, "bold"),
+                (f"Accuracy      {acc:.1f}%",
+                                    _NEON,     10, "bold"),
+                ("─"*28,            _GRID_C,    8, "normal"),
+                (f"Avg RT        {avg_rt}",
+                                    _YELLOW_H,  9, "normal"),
+                (f"Best RT       {best_rt}",
+                                    _GREEN_H,   9, "normal"),
+                (f"Avg Stability {avg_stab}",
+                                    _NEON,      9, "normal"),
+                (f"Max Combo     {snap['max_combo']}",
+                                    _ORANGE_H,  9, "bold"),
+                (f"Score         {snap['current_score']:,}",
+                                    _NEON,     10, "bold"),
+            ]
+
+            y_pos = 0.97
+            for txt, color, fsize, weight in metrics:
+                ax_info.text(0.05, y_pos, txt,
+                              transform=ax_info.transAxes,
+                              color=color, fontsize=fsize,
+                              fontweight=weight,
+                              fontfamily="monospace")
+                y_pos -= 0.078
+
+            # ═══════════════════════════════════════════════════
+            # SUPER-TITLE
+            # ═══════════════════════════════════════════════════
+            fig.suptitle(
+                "NEURO-OSU  ┃  Premium Clinical Dashboard",
+                color=_NEON, fontsize=12, fontweight="bold",
+                x=0.5, y=0.97,
+                fontfamily="monospace"
+            )
+
+        ani = animation.FuncAnimation(fig, update, interval=700,
+                                       cache_frame_data=False)
         plt.show(block=False)
+
         while not _dashboard_stop.is_set():
-            try: fig.canvas.flush_events(); time.sleep(0.05)
-            except: break
+            try:
+                fig.canvas.flush_events()
+                time.sleep(0.05)
+            except Exception:
+                break
+
     except Exception as e:
         print(f"Dashboard error (non-critical): {e}")
-        while not _dashboard_stop.is_set(): time.sleep(0.1)
+        import traceback; traceback.print_exc()
+        while not _dashboard_stop.is_set():
+            time.sleep(0.1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPAWN HELPER
@@ -539,14 +945,12 @@ def spawn_circle(params):
 # ─────────────────────────────────────────────────────────────────────────────
 def draw_menu(screen, fonts, pulse_t):
     screen.fill(BG_DARK)
-    # Dot grid
     for gx in range(0, SCREEN_W, 55):
         for gy in range(0, SCREEN_H, 55):
             pygame.draw.circle(screen, (20,26,44), (gx,gy), 1)
 
     cx = SCREEN_W // 2
 
-    # Animated glowing title
     g2 = int(160 + 50*math.sin(pulse_t*1.2))
     b2 = int(200 + 40*math.sin(pulse_t*0.8))
     title_surf = fonts["big"].render("NEURO-OSU", True, (60, g2, b2))
@@ -555,7 +959,6 @@ def draw_menu(screen, fonts, pulse_t):
     sub = fonts["small"].render("Adaptive Kinetic Path-Finder  |  Motor Training", True, GREY)
     screen.blit(sub, (cx - sub.get_width()//2, 215))
 
-    # Info panel
     _panel(screen, pygame.Rect(cx-340, 270, 680, 90), fill=PANEL, border=BORDER)
     for i, (line, col) in enumerate([
         ("Click the glowing circles before they expire to score points.", LGREY),
@@ -564,7 +967,6 @@ def draw_menu(screen, fonts, pulse_t):
         s = fonts["tiny"].render(line, True, col)
         screen.blit(s, (cx - s.get_width()//2, 285 + i*30))
 
-    # Decorative animated circles
     for i in range(6):
         angle = pulse_t * 0.4 + i * math.pi/3
         ox = cx + int(350 * math.cos(angle))
@@ -573,7 +975,6 @@ def draw_menu(screen, fonts, pulse_t):
         pygame.draw.circle(alpha_surf, (*CYAN, 18), (40,40), 38, 2)
         screen.blit(alpha_surf, (ox-40, oy-40))
 
-    # Orbiting small circles
     for i in range(12):
         angle = pulse_t * 0.8 + i * math.pi/6
         ox = cx + int(420 * math.cos(angle))
@@ -582,7 +983,6 @@ def draw_menu(screen, fonts, pulse_t):
         pygame.draw.circle(a_s, (*PINK, 25), (10,10), 9, 1)
         screen.blit(a_s, (ox-10, oy-10))
 
-    # Animated PLAY button
     pr = int(20*math.sin(pulse_t*2.2))
     play_rect = pygame.Rect(cx - 130, 395, 260, 58)
     pygame.draw.rect(screen, (0, 170+pr, 170+pr), play_rect, border_radius=10)
@@ -604,11 +1004,9 @@ def draw_game_over(screen, fonts, score, total_t, total_h, elapsed):
 
     cx = SCREEN_W // 2
 
-    # Title
     go_surf = fonts["big"].render("GAME  OVER", True, RED)
     screen.blit(go_surf, (cx - go_surf.get_width()//2, 100))
 
-    # Stats panel
     acc = (total_h / total_t * 100) if total_t else 0.0
     mins = int(elapsed)//60; secs = int(elapsed)%60
     _panel(screen, pygame.Rect(cx-320, 185, 640, 180), fill=PANEL2, border=BORDER)
@@ -629,7 +1027,6 @@ def draw_game_over(screen, fonts, score, total_t, total_h, elapsed):
         screen.blit(lb, (col_x - lb.get_width()//2, row_y))
         screen.blit(vl, (col_x - vl.get_width()//2, row_y + 22))
 
-    # Grade
     if   acc >= 90: grade, gc = "S", GOLD
     elif acc >= 80: grade, gc = "A", GREEN
     elif acc >= 65: grade, gc = "B", CYAN
@@ -640,13 +1037,11 @@ def draw_game_over(screen, fonts, score, total_t, total_h, elapsed):
     grade_surf = fonts["big"].render(grade, True, gc)
     screen.blit(grade_surf, (cx + 260 - grade_surf.get_width()//2, 230))
 
-    # Retry button
     retry_rect = pygame.Rect(cx - 215, 400, 190, 55)
     pygame.draw.rect(screen, GREEN, retry_rect, border_radius=10)
     rt = fonts["fb"].render("RETRY", True, BG_DARK)
     screen.blit(rt, (retry_rect.centerx - rt.get_width()//2, retry_rect.centery - rt.get_height()//2))
 
-    # Main Menu button
     menu_rect = pygame.Rect(cx + 25, 400, 190, 55)
     pygame.draw.rect(screen, CYAN, menu_rect, border_radius=10)
     mt = fonts["fb"].render("MAIN MENU", True, BG_DARK)
@@ -667,6 +1062,9 @@ def _trail_variance(trail):
     mx_v = sum(xs)/len(xs);   my_v = sum(ys)/len(ys)
     return sum((x-mx_v)**2 + (y-my_v)**2 for x,y in pts) / len(pts)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
@@ -736,6 +1134,30 @@ def main():
         cursor_trail  = deque(maxlen=12)
         recent_rts    = deque(maxlen=20)
         shared.session_start = time.time()
+        # Reset shared data for new session
+        with shared.lock:
+            shared.trial_numbers.clear()
+            shared.reaction_times.clear()
+            shared.stabilities.clear()
+            shared.difficulties.clear()
+            shared.scores_binary.clear()
+            shared.score_labels.clear()
+            shared.velocities.clear()
+            shared.error_distances.clear()
+            shared.combo_at_trial.clear()
+            shared.health_at_trial.clear()
+            shared.cumulative_scores.clear()
+            shared.total_trials   = 0
+            shared.total_hits     = 0
+            shared.current_diff   = 1
+            shared.current_combo  = 0
+            shared.max_combo      = 0
+            shared.current_health = 100.0
+            shared.current_score  = 0
+            shared.perfect_count  = 0
+            shared.great_count    = 0
+            shared.good_count     = 0
+            shared.miss_count     = 0
 
     running = True
     while running:
@@ -748,6 +1170,9 @@ def main():
         # ──────────────────────────────────────────────────────
         if state == "menu":
             play_rect = draw_menu(screen, fonts, pulse_t)
+            # Draw custom cursor on menu too
+            pygame.draw.circle(screen, WHITE, (mx, my), 6)
+            pygame.draw.circle(screen, CYAN,  (mx, my), 10, 1)
             pygame.display.flip()
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:      running = False
@@ -769,6 +1194,9 @@ def main():
             draw_grid(screen)
             retry_rect, menu_rect = draw_game_over(
                 screen, fonts, score, total_t, total_h, elapsed_final)
+            # Draw custom cursor on game over too
+            pygame.draw.circle(screen, WHITE, (mx, my), 6)
+            pygame.draw.circle(screen, CYAN,  (mx, my), 10, 1)
             pygame.display.flip()
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:      running = False
@@ -824,7 +1252,10 @@ def main():
 
                         mv = _trail_variance(cursor_trail)
                         log_trial(circ.id, rt, err, mouse_vel,
-                                  diff_mgr.level, score_label, mv, "circle")
+                                  diff_mgr.level, score_label, mv, "circle",
+                                  current_combo=combo,
+                                  current_health=health,
+                                  current_score=score)
                         diff_mgr.record(score_label, mv)
                         recent_rts.append(rt)
 
@@ -856,7 +1287,10 @@ def main():
                 flashes.append(Flash(RED, 0.12))
                 mv = _trail_variance(cursor_trail)
                 log_trial(circ.id, circ.lifetime, circ.radius*2,
-                          0, diff_mgr.level, "Miss", mv, "circle")
+                          0, diff_mgr.level, "Miss", mv, "circle",
+                          current_combo=combo,
+                          current_health=health,
+                          current_score=score)
                 diff_mgr.record("Miss", mv)
                 float_texts.append(FloatText(circ.x, circ.y-20, "MISS", RED, 22))
 
