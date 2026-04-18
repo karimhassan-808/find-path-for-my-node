@@ -3,7 +3,7 @@
 
 import pygame
 from core.constants import (
-    SCREEN_W, SCREEN_H, BG_DARK, PANEL, BORDER,
+    BG_DARK, PANEL, BORDER,
     CYAN, GREEN, YELLOW, ORANGE, RED, PINK, WHITE, GREY, LGREY,
     DIFF_COLORS,
 )
@@ -50,65 +50,58 @@ def _mini_spark(surf, x, y, w, h, vals, color):
 
 
 def draw_grid(surf):
-    # very subtle grid — keeps visual noise low for adhd users
-    for x in range(0, SCREEN_W, 55):
-        pygame.draw.line(surf, (14, 17, 28), (x, 0), (x, SCREEN_H))
-    for y in range(90, SCREEN_H, 55):
-        pygame.draw.line(surf, (14, 17, 28), (0, y), (SCREEN_W, y))
+    sw, sh = surf.get_size()                          # ← live size
+    for x in range(0, sw, 55):
+        pygame.draw.line(surf, (14, 17, 28), (x, 0), (x, sh))
+    for y in range(90, sh, 55):
+        pygame.draw.line(surf, (14, 17, 28), (0, y), (sw, y))
 
-
-# ── main hud ──────────────────────────────────────────────────────────────────
 
 def draw_hud(surf, fonts, diff_mgr, score, combo, accuracy, elapsed, health, recent_rts):
+    sw, sh = surf.get_size()                          # ← live size
     level  = diff_mgr.level
     params = diff_mgr.params
     col    = DIFF_COLORS[level]
 
-    _panel(surf, pygame.Rect(0, 0, SCREEN_W, 90), fill=(12, 15, 25), border=BORDER, r=0)
+    _panel(surf, pygame.Rect(0, 0, sw, 90), fill=(12, 15, 25), border=BORDER, r=0)
 
-    # score
     _txt(surf, f"{score:,}", fonts["hud"], CYAN, x=18, y=8)
     _txt(surf, "SCORE", fonts["tiny"], GREY, x=18, y=50)
 
-    # level badge
     lx = 215
     pygame.draw.rect(surf, col, pygame.Rect(lx, 10, 115, 34), border_radius=8)
     _txt(surf, f"LVL {level}", fonts["fb"], (14, 16, 26), cx=lx + 57, y=16)
     short = params["label"].split("-")[1].strip() if "-" in params["label"] else params["label"]
     _txt(surf, short, fonts["tiny"], GREY, cx=lx + 57, y=50)
 
-    # combo
     cx_c = lx + 145
     sc   = ORANGE if combo >= 5 else (WHITE if combo > 0 else GREY)
     _txt(surf, f"x{combo}", fonts["hud"], sc, x=cx_c, y=8)
     _txt(surf, "COMBO", fonts["tiny"], GREY, x=cx_c, y=50)
 
-    # accuracy
     ax  = cx_c + 115
     ac  = GREEN if accuracy > 80 else (YELLOW if accuracy > 55 else ORANGE)
     _txt(surf, f"{accuracy:.0f}%", fonts["hud"], ac, x=ax, y=8)
     _txt(surf, "ACCURACY", fonts["tiny"], GREY, x=ax, y=50)
 
-    # timer
     mins = int(elapsed) // 60
     secs = int(elapsed) % 60
     tx   = ax + 140
     _txt(surf, f"{mins:02d}:{secs:02d}", fonts["hud"], LGREY, x=tx, y=8)
     _txt(surf, "TIME", fonts["tiny"], GREY, x=tx, y=50)
 
-    # health bar
-    hbar_x = SCREEN_W - 325
-    hbar_w = 300
+    # health bar — right-anchored to live width
+    hbar_w = max(200, sw // 4)
+    hbar_x = sw - hbar_w - 25
     hp_col = GREEN if health > 60 else (YELLOW if health > 30 else RED)
     _txt(surf, "HP", fonts["tiny"], GREY, x=hbar_x, y=5)
     _pbar(surf, hbar_x, 22, hbar_w, 20, health / 100.0, hp_col, r=6)
     _txt(surf, f"{int(health)}%", fonts["tiny"], hp_col, x=hbar_x + hbar_w + 5, y=25)
 
-    # reaction time sparkline
     rts_list = list(recent_rts)
     if len(rts_list) >= 3:
         _mini_spark(surf, hbar_x, 50, hbar_w, 32, rts_list[-12:], CYAN)
         _txt(surf, "reaction times (recent)", fonts["tiny"], (60, 75, 110), x=hbar_x, y=83)
 
     hint = fonts["tiny"].render("click the circles  |  esc to quit", True, (45, 58, 85))
-    surf.blit(hint, (SCREEN_W // 2 - hint.get_width() // 2, SCREEN_H - 18))
+    surf.blit(hint, (sw // 2 - hint.get_width() // 2, sh - 18))  # ← live sw, sh

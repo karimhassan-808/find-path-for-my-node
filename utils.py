@@ -24,12 +24,12 @@ def trail_variance(trail) -> float:
 
 _id_counter = 0
 
-def spawn_circle(params: dict) -> HitCircle:
+def spawn_circle(params: dict, sw: int = 1280, sh: int = 720) -> HitCircle:
     global _id_counter
     _id_counter += 1
     margin = params["circle_r"] + 20
-    x = random.randint(margin, SCREEN_W - margin)
-    y = random.randint(100, SCREEN_H - margin)
+    x = random.randint(margin, sw - margin)
+    y = random.randint(100, sh - margin)
     return HitCircle(x, y, params, target_id=_id_counter)
 
 
