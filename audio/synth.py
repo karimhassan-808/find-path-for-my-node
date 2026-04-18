@@ -20,10 +20,12 @@ def _tone(freq, dur, vol=0.35, wave="sine", attack=0.03, release=0.08):
     return pygame.sndarray.make_sound(np.column_stack([w, w]))
 
 
-def _make_bgm(vol=0.10):
-    penta = [262, 330, 392, 440, 523, 440, 392, 330]
-    bpm   = 92
-    beat  = 60 / bpm / 1.5
+def _make_bgm(vol=0.06):
+    # 70 bpm, gentler descending pentatonic — calmer for sustained attention sessions
+    # high tempo / loud music increases arousal which can worsen adhd focus
+    penta = [330, 294, 262, 247, 220, 247, 262, 294]
+    bpm   = 70
+    beat  = 60 / bpm / 1.1
     sr    = 44100
     total = int(sr * beat * len(penta) * 2)
     buf   = np.zeros(total)

@@ -24,6 +24,43 @@ from core.constants import (
 from core.shared_data import shared
 
 dashboard_stop = threading.Event()
+_dashboard_fig = [None]  # mutable ref so thread can write the figure back
+
+
+def save_dashboard_png(path="savedDashboards/neuro_osu_dashboard.png"):
+    """save current dashboard as png."""
+    fig = _dashboard_fig[0]
+    if fig is None:
+        print("no dashboard to save yet"); return False
+    try:
+        fig.savefig(path, dpi=150, bbox_inches="tight", facecolor=HEX_BG)
+        print(f"dashboard saved → {path}"); return True
+    except Exception as e:
+        print(f"save failed: {e}"); return False
+
+
+def save_session_csv(src="patient_performance.csv", dst=None):
+    """copy session csv to a timestamped file."""
+    import shutil
+    from datetime import datetime as _dt
+    if dst is None:
+        dst = f"savedSessions/session_{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    try:
+        shutil.copy2(src, dst); print(f"csv saved → {dst}"); return dst
+    except Exception as e:
+        print(f"csv save failed: {e}"); return None
+
+
+def show_last_dashboard():
+    """focus the dashboard window if still open."""
+    fig = _dashboard_fig[0]
+    if fig is None: return
+    try:
+        fig.canvas.manager.window.activateWindow()
+        fig.canvas.manager.window.raise_()
+    except Exception:
+        pass
+
 
 
 def _rolling_avg(vals, window=5):
@@ -147,7 +184,7 @@ def clinical_dashboard():
             ax_radar.set_yticklabels(["25%","50%","75%","100%"], fontsize=6, color=HEX_DIM)
             ax_radar.yaxis.grid(True, color=HEX_GRID, lw=0.4)
             ax_radar.xaxis.grid(True, color=HEX_GRID, lw=0.4)
-            ax_radar.set_title("🕸  attention profile", color=HEX_NEON,
+            ax_radar.set_title("attention profile", color=HEX_NEON,
                                fontsize=9, fontweight="bold", pad=14)
             for sp in ax_radar.spines.values(): sp.set_color(HEX_GRID)
 
@@ -166,7 +203,7 @@ def clinical_dashboard():
             ax_stab.set_ylim(0, 1.05)
 
             # 5 — health & combo
-            _style(ax_combo, "❤️  health & combo", "trial #", "")
+            _style(ax_combo, "health & combo", "trial #", "")
             if trials:
                 ax_combo.plot(trials, healths, color=HEX_RED, lw=2, label="health %")
                 ax_combo.fill_between(trials, healths, alpha=0.1, color=HEX_RED)
@@ -203,10 +240,10 @@ def clinical_dashboard():
                          color=arc_cols[diff_now - 1], fontsize=16, fontweight="bold")
             lbl = DIFFICULTY_LEVELS[diff_now]["label"].split("-")[1].strip()
             ax_diff.text(0, -0.60, lbl, ha="center", color=HEX_DIM, fontsize=8)
-            ax_diff.set_title("⚙  difficulty", color=HEX_NEON, fontsize=9, fontweight="bold", pad=4)
+            ax_diff.set_title("difficulty", color=HEX_NEON, fontsize=9, fontweight="bold", pad=4)
 
             # 7 — cursor velocity (impulsivity proxy)
-            _style(ax_vel, "🚀  cursor velocity  (impulsivity proxy)", "trial #", "px/s")
+            _style(ax_vel, "cursor velocity (impulsivity proxy)", "trial #", "px/s")
             if trials and vels:
                 ax_vel.fill_between(trials, vels, alpha=0.12, color=HEX_ORANGE)
                 ax_vel.plot(trials, vels, color=HEX_ORANGE, lw=1.5,
@@ -216,7 +253,7 @@ def clinical_dashboard():
                     ax_vel.plot(trials[4:], va, color=HEX_NEON, lw=2)
 
             # 8 — click precision
-            _style(ax_err, "📐  click precision", "trial #", "error (px)")
+            _style(ax_err, "click precision", "trial #", "error (px)")
             if trials and errs:
                 sc = [HEX_GREEN if e < 10 else (HEX_YELLOW if e < 25 else
                       (HEX_ORANGE if e < 50 else HEX_RED)) for e in errs]
@@ -243,7 +280,7 @@ def clinical_dashboard():
             else:
                 ax_pie.text(0, 0, "no data", ha="center", va="center",
                             color=HEX_DIM, fontsize=10)
-            ax_pie.set_title("🏆  hit breakdown", color=HEX_NEON, fontsize=9,
+            ax_pie.set_title("hit breakdown", color=HEX_NEON, fontsize=9,
                              fontweight="bold", pad=8)
 
             # 9b — session metrics panel
@@ -283,7 +320,9 @@ def clinical_dashboard():
 
         ani = animation.FuncAnimation(fig, update, interval=700, cache_frame_data=False)
         plt.show(block=False)
+        _dashboard_fig[0] = fig
 
+        # keep running even after the game window closes
         while not dashboard_stop.is_set():
             try:
                 fig.canvas.flush_events()

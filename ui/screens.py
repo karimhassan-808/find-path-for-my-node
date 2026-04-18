@@ -63,10 +63,26 @@ def draw_menu(screen, fonts, pulse_t: float):
     play_txt = fonts["fb"].render("▶  PLAY", True, BG_DARK)
     screen.blit(play_txt, (cx - play_txt.get_width() // 2, 410))
 
+    # view last dashboard button
+    view_rect = pygame.Rect(cx - 270, 475, 240, 44)
+    pygame.draw.rect(screen, (20, 25, 55), view_rect, border_radius=8)
+    pygame.draw.rect(screen, BORDER, view_rect, 1, border_radius=8)
+    vt = fonts["small"].render("view dashboard", True, CYAN)
+    screen.blit(vt, (view_rect.centerx - vt.get_width() // 2,
+                     view_rect.centery - vt.get_height() // 2))
+
+    # save dashboard button
+    save_rect = pygame.Rect(cx + 30, 475, 240, 44)
+    pygame.draw.rect(screen, (20, 25, 55), save_rect, border_radius=8)
+    pygame.draw.rect(screen, BORDER, save_rect, 1, border_radius=8)
+    st = fonts["small"].render("save dashboard", True, GREEN)
+    screen.blit(st, (save_rect.centerx - st.get_width() // 2,
+                     save_rect.centery - st.get_height() // 2))
+
     hint = fonts["tiny"].render("press space or click play to start", True, (38, 48, 72))
     screen.blit(hint, (cx - hint.get_width() // 2, SCREEN_H - 45))
 
-    return play_rect
+    return play_rect, view_rect, save_rect
 
 
 def draw_game_over(screen, fonts, score, total_t, total_h, elapsed):

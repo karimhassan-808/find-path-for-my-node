@@ -21,7 +21,7 @@ from entities.float_text import FloatText
 from audio.synth import AudioManager
 from ui.hud      import draw_hud, draw_grid
 from ui.screens  import draw_menu, draw_game_over
-from ui.dashboard import clinical_dashboard, dashboard_stop
+from ui.dashboard import clinical_dashboard, dashboard_stop, save_dashboard_png, save_session_csv, show_last_dashboard
 
 from utils import trail_variance, spawn_circle, GameSession
 
@@ -66,7 +66,7 @@ def main():
 
         # ── menu ──────────────────────────────────────────────────────────────
         if state == "menu":
-            play_rect = draw_menu(screen, fonts, pulse_t)
+            play_rect, view_rect, save_rect = draw_menu(screen, fonts, pulse_t)
             pygame.draw.circle(screen, WHITE, (mx, my), 6)
             pygame.draw.circle(screen, CYAN,  (mx, my), 10, 1)
             pygame.display.flip()
@@ -76,7 +76,13 @@ def main():
                     if ev.key == pygame.K_ESCAPE: running = False
                     if ev.key == pygame.K_SPACE:  start_game(); state = "playing"
                 if ev.type == pygame.MOUSEBUTTONDOWN:
-                    if play_rect.collidepoint(ev.pos): start_game(); state = "playing"
+                    if play_rect.collidepoint(ev.pos):
+                        start_game(); state = "playing"
+                    elif view_rect.collidepoint(ev.pos):
+                        show_last_dashboard()
+                    elif save_rect.collidepoint(ev.pos):
+                        save_dashboard_png()
+                        save_session_csv()
             continue
 
         # ── game over ─────────────────────────────────────────────────────────

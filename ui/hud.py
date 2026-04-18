@@ -50,10 +50,11 @@ def _mini_spark(surf, x, y, w, h, vals, color):
 
 
 def draw_grid(surf):
+    # very subtle grid — keeps visual noise low for adhd users
     for x in range(0, SCREEN_W, 55):
-        pygame.draw.line(surf, (16, 20, 34), (x, 0), (x, SCREEN_H))
+        pygame.draw.line(surf, (14, 17, 28), (x, 0), (x, SCREEN_H))
     for y in range(90, SCREEN_H, 55):
-        pygame.draw.line(surf, (16, 20, 34), (0, y), (SCREEN_W, y))
+        pygame.draw.line(surf, (14, 17, 28), (0, y), (SCREEN_W, y))
 
 
 # ── main hud ──────────────────────────────────────────────────────────────────
