@@ -102,23 +102,33 @@ Stability = 1 - min(MotionVariance / 500, 1.0)
 ## Architecture
 
 ```
-neuro_osu.py
-├── SharedData          Thread-safe store for dashboard data
-├── DifficultyManager   DDA engine; Stability Ratio logic
-├── HitCircle           Spawn, render, hit-test, score
-├── Slider              Bézier path, drag tracking, deviation
-├── Particle            Visual hit-burst effects
-├── FloatText           Floating "Perfect / Great / Miss" labels
-├── clinical_dashboard  Matplotlib animation (daemon thread)
-├── log_trial           CSV append + shared data update
-└── main                Pygame event loop, spawn scheduler
+neuro_osu/
+├── main.py              # ~100 lines, event loop only
+├── utils.py             # trail_variance, spawn_circle, GameSession
+├── core/
+│   ├── constants.py     # all magic numbers
+│   ├── shared_data.py   # SharedData + .reset() + .snapshot()
+│   ├── difficulty.py    # DifficultyManager
+│   └── logger.py        # init_csv, log_trial
+├── entities/
+│   ├── hit_circle.py    # HitCircle (id injected, no class counter)
+│   ├── particle.py      # Particle, burst, ring_burst
+│   ├── flash.py         # Flash
+│   └── float_text.py    # FloatText
+├── audio/
+│   └── synth.py         # AudioManager
+└── ui/
+    ├── hud.py           # draw_hud + primitives
+    ├── screens.py       # draw_menu, draw_game_over
+    └── dashboard.py     # clinical_dashboard thread
 ```
 
 ---
 
 ## Clinical Notes
-- `MotionVariance` correlates with **tremor amplitude** and can be trended
-  across sessions for longitudinal analysis.
+- This project is scoped for attention and impulse-control training contexts (e.g. ADHD).
+- The app can help track focus, response speed, and consistency over time,
+  giving a simple progress snapshot across sessions.
 - `ReactionTime` is measured as the delta from target spawn to the moment
   the cursor first moves toward the target (within 3× radius, velocity > 5 px/s),
   capturing *true* reaction latency rather than click time.
