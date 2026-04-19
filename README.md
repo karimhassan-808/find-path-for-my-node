@@ -45,6 +45,11 @@ data and metrics sections.
 - Short gameplay clip
   - `docs/demo/neuro-osu-demo.mp4`
 
+### Audio
+- The hit and miss sounds are synthesized in real time (no bundled audio files).
+- You can tweak or replace the synth by editing:
+  - `audio/synth.py`
+
 ### Data Captured → `patient_performance.csv`
 
 | Column | Type | Description |
