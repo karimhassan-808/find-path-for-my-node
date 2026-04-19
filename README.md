@@ -35,15 +35,19 @@ data and metrics sections.
 
 ### Screenshots
 - Gameplay (HUD + targets)
-  - `docs/screenshots/gameplay.png`
+ <img src="docs/screenshots/Gameplay.png" alt="Gameplay shot">
 - Dashboard (clinical view)
-  - `docs/screenshots/dashboard.png`
-- Game Over summary
-  - `docs/screenshots/game_over.png`
+ <img src="docs/screenshots/Dashboard.png" alt="Clinical Dashboard">
 
 ### Demo
 - Short gameplay clip
-  - `docs/demo/neuro-osu-demo.mp4`
+
+https://github.com/user-attachments/assets/af9a90e2-7a12-4a97-a3fa-52b32855eb4a
+
+
+
+
+
 
 ### Audio
 - The hit and miss sounds are synthesized in real time (no bundled audio files).
