@@ -1,5 +1,5 @@
 # NEURO-OSU — Adaptive Kinetic Path-Finder
-### A Serious Game for Motor Recovery & Cognitive Training
+### A Serious Game for Motor Recovery & Cognitive Training (e.g. ADHD patients)
 
 ---
 
@@ -19,20 +19,31 @@ python neuro_osu.py
 
 ## Project Description
 
-### Objective
-Neuro-Osu is a clinically-motivated *serious game* that quantifies motor precision,
-reaction speed, and trajectory stability in patients undergoing neurological
-rehabilitation. By mapping classical Osu-style mechanics onto measurable
-biomechanical parameters, it produces a longitudinal performance record suitable
-for clinical review and research publication.
+### Overview
+Neuro-Osu is a neon, rhythm-inspired focus game where glowing targets bloom and fade
+across the screen. The goal is simple: stay calm, move with purpose, and tap each
+circle before it disappears. As you find your groove, the game quietly adapts to keep
+things exciting without becoming overwhelming.
 
-### Interactivity
+### What You Do
+- Track glowing circles as they appear and fade.
+- Click quickly but precisely to keep your streak alive.
+- Ride the adaptive pace as the game learns your rhythm.
 
-| Mechanic | Description | Metric |
-|---|---|---|
-| **Hit Circles** | Neon targets spawn and fade; patient clicks before timeout | Reaction latency (s) |
-| **Neural Paths (Sliders)** | Click-and-drag along a Bézier curve | Path deviation (px) |
-| **Adaptive DDA** | Auto-scales difficulty every 3 qualifying trials | Stability Ratio |
+If you want the full technical details and data definitions, scroll down to the
+data and metrics sections.
+
+### Screenshots
+- Gameplay (HUD + targets)
+  - `docs/screenshots/gameplay.png`
+- Dashboard (clinical view)
+  - `docs/screenshots/dashboard.png`
+- Game Over summary
+  - `docs/screenshots/game_over.png`
+
+### Demo
+- Short gameplay clip
+  - `docs/demo/neuro-osu-demo.mp4`
 
 ### Data Captured → `patient_performance.csv`
 
@@ -42,7 +53,7 @@ for clinical review and research publication.
 | `TargetID` | int | Unique target identifier |
 | `ReactionTime` | float (s) | Δ between spawn and first directed cursor move |
 | `ErrorDistance` | float (px) | Cursor distance from ideal target centre or path |
-| `Velocity` | float (px/s) | Cursor speed at moment of interaction |
+| `Velocity` | float (px/s) | Average cursor speed over the recent trail window |
 | `CurrentDifficulty` | int 1–5 | Active difficulty level |
 | `HitScore` | str | Perfect / Great / Good / Miss |
 | `MotionVariance` | float | X,Y variance of cursor trail (tremor proxy) |
@@ -50,7 +61,7 @@ for clinical review and research publication.
 
 ### Output
 - **Pygame window** — patient-facing gameplay (1280×720, 60 fps)
-- **Matplotlib dashboard** — doctor-facing, updates every 800 ms; shows
+- **Matplotlib dashboard (can be exported as png)** — doctor-facing, updates every 800 ms; shows
   Reaction Time trend, Stability Ratio bars, Difficulty gauge, and Session KPIs
 - **CSV export** — every interaction appended in real time
 

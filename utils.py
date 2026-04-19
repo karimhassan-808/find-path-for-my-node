@@ -19,7 +19,25 @@ def trail_variance(trail) -> float:
         return 0.0
     mx = sum(p[0] for p in pts) / len(pts)
     my = sum(p[1] for p in pts) / len(pts)
-    return sum((x - mx) ** 2 + (y - my) ** 2 for x, y in pts) / len(pts)
+    return sum((p[0] - mx) ** 2 + (p[1] - my) ** 2 for p in pts) / len(pts)
+
+
+def trail_velocity(trail) -> float:
+    """average cursor speed (px/s) over the trail window."""
+    pts = list(trail)
+    if len(pts) < 2:
+        return 0.0
+    total_dist = 0.0
+    total_dt = 0.0
+    for i in range(1, len(pts)):
+        x1, y1, t1 = pts[i - 1]
+        x2, y2, t2 = pts[i]
+        dt = t2 - t1
+        if dt <= 0:
+            continue
+        total_dist += math.hypot(x2 - x1, y2 - y1)
+        total_dt += dt
+    return total_dist / total_dt if total_dt > 0 else 0.0
 
 
 _id_counter = 0

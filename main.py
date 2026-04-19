@@ -28,7 +28,7 @@ from ui.hud       import draw_hud, draw_grid
 from ui.screens   import draw_menu, draw_game_over
 from ui.dashboard import run_dashboard
 
-from utils import trail_variance, spawn_circle, GameSession
+from utils import trail_variance, trail_velocity, spawn_circle, GameSession
 
 SESSIONS_DIR = "savedSessions"
 
@@ -133,10 +133,10 @@ def _pygame_worker():
             continue
 
         # ── playing ───────────────────────────────────────────────────────────
-        dx = mx - gs.prev_mouse[0]; dy = my - gs.prev_mouse[1]
-        gs.mouse_vel   = math.hypot(dx, dy) / max(dt, 0.001)
+        now_t = time.time()
         gs.prev_mouse  = (mx, my)
-        gs.cursor_trail.append((mx, my))
+        gs.cursor_trail.append((mx, my, now_t))
+        gs.mouse_vel = trail_velocity(gs.cursor_trail)
 
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
@@ -237,7 +237,7 @@ def _pygame_worker():
         for f    in gs.flashes:     f.draw(screen)
 
         trail_list = list(gs.cursor_trail)
-        for i, (tx, ty) in enumerate(trail_list):
+        for i, (tx, ty, _t) in enumerate(trail_list):
             alpha = int(180 * i / max(len(trail_list), 1))
             r_sz  = max(1, 4 - i // 3)
             ts    = pygame.Surface((r_sz * 2, r_sz * 2), pygame.SRCALPHA)

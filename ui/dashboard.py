@@ -13,7 +13,9 @@ matplotlib.use("Qt5Agg")
 import warnings
 warnings.filterwarnings(
     "ignore",
-    message="Ignoring fixed x limits to fulfill fixed data aspect",
+    message="Ignoring fixed x limits to fulfill fixed data aspect.*",
+    category=UserWarning,
+    module=r"matplotlib\..*",
 )
 
 import matplotlib.pyplot as plt

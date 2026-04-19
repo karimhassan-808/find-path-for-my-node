@@ -65,34 +65,43 @@ def draw_hud(surf, fonts, diff_mgr, score, combo, accuracy, elapsed, health, rec
 
     _panel(surf, pygame.Rect(0, 0, sw, 90), fill=(12, 15, 25), border=BORDER, r=0)
 
-    _txt(surf, f"{score:,}", fonts["hud"], CYAN, x=18, y=8)
-    _txt(surf, "SCORE", fonts["tiny"], GREY, x=18, y=50)
+    margin = 24
+    gap = 16
+    min_left = 5 * 110
+    available = max(0, sw - margin * 2 - gap)
+    hbar_w = max(180, sw // 4)
+    if available < min_left + hbar_w:
+        hbar_w = max(120, available - min_left)
+    hbar_w = max(120, min(hbar_w, available))
+    hbar_x = sw - margin - hbar_w
+    left_w = max(0, hbar_x - margin - gap)
+    slot_w = left_w / 5 if left_w > 0 else 0
+    slot_cx = [margin + slot_w * (i + 0.5) for i in range(5)]
 
-    lx = 215
-    pygame.draw.rect(surf, col, pygame.Rect(lx, 10, 115, 34), border_radius=8)
-    _txt(surf, f"LVL {level}", fonts["fb"], (14, 16, 26), cx=lx + 57, y=16)
+    _txt(surf, f"{score:,}", fonts["hud"], CYAN, cx=slot_cx[0], y=8)
+    _txt(surf, "SCORE", fonts["tiny"], GREY, cx=slot_cx[0], y=50)
+
+    box_w = 120
+    box_x = int(slot_cx[1] - box_w / 2)
+    pygame.draw.rect(surf, col, pygame.Rect(box_x, 10, box_w, 34), border_radius=8)
+    _txt(surf, f"LVL {level}", fonts["fb"], (14, 16, 26), cx=slot_cx[1], y=16)
     short = params["label"].split("-")[1].strip() if "-" in params["label"] else params["label"]
-    _txt(surf, short, fonts["tiny"], GREY, cx=lx + 57, y=50)
+    _txt(surf, short, fonts["tiny"], GREY, cx=slot_cx[1], y=50)
 
-    cx_c = lx + 145
-    sc   = ORANGE if combo >= 5 else (WHITE if combo > 0 else GREY)
-    _txt(surf, f"x{combo}", fonts["hud"], sc, x=cx_c, y=8)
-    _txt(surf, "COMBO", fonts["tiny"], GREY, x=cx_c, y=50)
+    sc = ORANGE if combo >= 5 else (WHITE if combo > 0 else GREY)
+    _txt(surf, f"x{combo}", fonts["hud"], sc, cx=slot_cx[2], y=8)
+    _txt(surf, "COMBO", fonts["tiny"], GREY, cx=slot_cx[2], y=50)
 
-    ax  = cx_c + 115
-    ac  = GREEN if accuracy > 80 else (YELLOW if accuracy > 55 else ORANGE)
-    _txt(surf, f"{accuracy:.0f}%", fonts["hud"], ac, x=ax, y=8)
-    _txt(surf, "ACCURACY", fonts["tiny"], GREY, x=ax, y=50)
+    ac = GREEN if accuracy > 80 else (YELLOW if accuracy > 55 else ORANGE)
+    _txt(surf, f"{accuracy:.0f}%", fonts["hud"], ac, cx=slot_cx[3], y=8)
+    _txt(surf, "ACCURACY", fonts["tiny"], GREY, cx=slot_cx[3], y=50)
 
     mins = int(elapsed) // 60
     secs = int(elapsed) % 60
-    tx   = ax + 140
-    _txt(surf, f"{mins:02d}:{secs:02d}", fonts["hud"], LGREY, x=tx, y=8)
-    _txt(surf, "TIME", fonts["tiny"], GREY, x=tx, y=50)
+    _txt(surf, f"{mins:02d}:{secs:02d}", fonts["hud"], LGREY, cx=slot_cx[4], y=8)
+    _txt(surf, "TIME", fonts["tiny"], GREY, cx=slot_cx[4], y=50)
 
-    # health bar — right-anchored to live width
-    hbar_w = max(200, sw // 4)
-    hbar_x = sw - hbar_w - 25
+    # health bar — right-anchored with a consistent margin
     hp_col = GREEN if health > 60 else (YELLOW if health > 30 else RED)
     _txt(surf, "HP", fonts["tiny"], GREY, x=hbar_x, y=5)
     _pbar(surf, hbar_x, 22, hbar_w, 20, health / 100.0, hp_col, r=6)
