@@ -35,9 +35,9 @@ data and metrics sections.
 
 ### Screenshots
 - Gameplay (HUD + targets)
- <img src="docs/screenshots/Gameplay.png" alt="Gameplay shot" width="500">
+ <img src="docs/screenshots/Gameplay.png" alt="Gameplay shot">
 - Dashboard (clinical view)
- <img src="docs/screenshots/Dashboard.png" alt="Clinical Dashboard" width="500">
+ <img src="docs/screenshots/Dashboard.png" alt="Clinical Dashboard">
 
 ### Demo
 - Short gameplay clip
